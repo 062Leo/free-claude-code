@@ -1,5 +1,6 @@
 """Shared base class for OpenAI-compatible providers (NIM, OpenRouter, LM Studio)."""
 
+import asyncio
 import json
 import uuid
 from abc import abstractmethod
@@ -22,6 +23,9 @@ from providers.common import (
     map_stop_reason,
 )
 from providers.rate_limit import GlobalRateLimiter
+
+_KEEPALIVE = object()
+_KEEPALIVE_INTERVAL_S = 15.0
 
 
 class OpenAICompatibleProvider(BaseProvider):
@@ -111,6 +115,27 @@ class OpenAICompatibleProvider(BaseProvider):
         for tool_index, out in sse.blocks.flush_task_arg_buffers():
             yield sse.emit_tool_delta(tool_index, out)
 
+    @staticmethod
+    async def _with_keepalive(
+        stream: Any,
+        interval: float = _KEEPALIVE_INTERVAL_S,
+    ) -> AsyncIterator[Any]:
+        """Wrap an async stream to yield keepalive sentinels between chunks.
+
+        If no data arrives within *interval* seconds, yields a ``_KEEPALIVE``
+        sentinel so the caller can emit an SSE comment and keep the connection
+        alive for clients that enforce an idle timeout (e.g. Claude Code).
+        """
+        aiter = stream.__aiter__()
+        while True:
+            try:
+                chunk = await asyncio.wait_for(aiter.__anext__(), timeout=interval)
+                yield chunk
+            except TimeoutError:
+                yield _KEEPALIVE
+            except StopAsyncIteration:
+                break
+
     async def stream_response(
         self,
         request: Any,
@@ -162,7 +187,11 @@ class OpenAICompatibleProvider(BaseProvider):
                 stream = await self._global_rate_limiter.execute_with_retry(
                     self._client.chat.completions.create, **body, stream=True
                 )
-                async for chunk in stream:
+                async for chunk in self._with_keepalive(stream):
+                    if chunk is _KEEPALIVE:
+                        yield ": keepalive\n\n"
+                        continue
+
                     if getattr(chunk, "usage", None):
                         usage_info = chunk.usage
 

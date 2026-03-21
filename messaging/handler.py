@@ -600,6 +600,12 @@ class ClaudeMessageHandler:
                         node_id,
                         captured_session_id,
                     )
+                    if parsed.get("type") == "complete":
+                        await self.platform.send_message(
+                            chat_id,
+                            "✅ *Fertig\\!*",
+                            parse_mode="MarkdownV2",
+                    )
 
         except asyncio.CancelledError:
             logger.warning(f"HANDLER: Task cancelled for node {node_id}")

@@ -30,7 +30,7 @@ class NimSettings(BaseModel):
     chat_template: str | None = None
     request_id: str | None = None
 
-    reasoning_effort: Literal["low", "medium", "high"] = "high"
+    reasoning_effort: Literal["low", "medium", "high"] = "low"
     include_reasoning: bool = True
 
     model_config = ConfigDict(extra="forbid")
